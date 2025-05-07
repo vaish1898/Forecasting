@@ -1,0 +1,110 @@
+install.packages(c("forecast", "imputeTS", "ggplot2", "Metrics", "tseries", "zoo"))
+# Load required packages
+library(forecast)
+library(imputeTS)
+library(ggplot2)
+library(tseries)
+library(zoo)
+library(Metrics)
+
+# 1. Load and inspect data
+pce_data <- read.csv("PCE.csv", stringsAsFactors = FALSE)
+str(pce_data)
+
+# 2. Data Cleaning
+# Convert 'Date' column to Date format
+pce_data$Date <- as.Date(pce_data$Date, format = "%m/%d/%Y")
+
+# Remove duplicates
+pce_data <- pce_data[!duplicated(pce_data), ]
+
+# 3. Handle missing values in PCE using Kalman filtering
+pce_data$PCE <- na_kalman(pce_data$PCE, model = "StructTS")
+
+# 4. Create Time Series object
+ts_data <- ts(pce_data$PCE, start = c(1959, 1), end = c(2023, 11), frequency = 12)
+
+# 5. Train-Test Split
+train_data <- window(ts_data, end = c(2009, 12))
+test_data <- window(ts_data, start = c(2010, 1))
+
+# 6. Forecasting Models
+
+## Naive Forecast
+naive_model <- naive(train_data, h = length(test_data))
+naive_forecast <- naive_model$mean
+
+## Exponential Smoothing
+ets_model <- ets(train_data)
+ets_forecast <- forecast(ets_model, h = length(test_data))$mean
+
+## ARIMA Model
+arima_model <- auto.arima(train_data)
+arima_forecast <- forecast(arima_model, h = length(test_data))$mean
+
+# 7. Evaluation Metrics
+evaluate <- function(actual, predicted, train_series = NULL) {
+  mae <- MAE(actual, predicted)
+  mse <- MSE(actual, predicted)
+  mape <- mean(abs((actual - predicted) / actual)) * 100
+  mase <- mae / mean(abs(diff(train_series)))
+  rmse <- RMSE(actual, predicted)
+  return(c(MAE = mae, MSE = mse, MAPE = mape, MASE = mase, RMSE = rmse))
+}
+
+naive_metrics <- evaluate(test_data, naive_forecast, train_data)
+ets_metrics <- evaluate(test_data, ets_forecast, train_data)
+arima_metrics <- evaluate(test_data, arima_forecast, train_data)
+
+metrics_df <- rbind(
+  Naive = naive_metrics,
+  `Exponential Smoothing` = ets_metrics,
+  ARIMA = arima_metrics
+)
+
+print("Accuracy Metrics:")
+print(round(metrics_df, 3))
+
+# 8. Forecast for October 2024 using ARIMA model fitted to full data
+final_arima <- auto.arima(ts_data)
+future_forecast <- forecast(final_arima, h = 11)
+oct_2024_forecast <- future_forecast$mean[11]
+cat("Predicted PCE for October 2024:", round(oct_2024_forecast, 2), "\n")
+
+# 9. One-Step Ahead Rolling Forecast (No re-estimation)
+
+rolling_forecast <- function(model_func, train, test) {
+  preds <- c()
+  for (i in 1:length(test)) {
+    model <- model_func(train)
+    fcast <- forecast(model, h = 1)$mean
+    preds <- c(preds, fcast)
+    train <- ts(c(train, test[i]), frequency = frequency(train))
+  }
+  return(preds)
+}
+
+naive_roll <- rolling_forecast(function(x) naive(x), train_data, test_data)
+ets_roll <- rolling_forecast(function(x) ets(x), train_data, test_data)
+arima_roll <- rolling_forecast(function(x) Arima(x, model = arima_model), train_data, test_data)
+
+# 10. One-Step Forecast Metrics
+naive_roll_metrics <- evaluate(test_data, naive_roll, train_data)
+ets_roll_metrics <- evaluate(test_data, ets_roll, train_data)
+arima_roll_metrics <- evaluate(test_data, arima_roll, train_data)
+
+rolling_df <- rbind(
+  Naive = naive_roll_metrics,
+  `Exponential Smoothing` = ets_roll_metrics,
+  ARIMA = arima_roll_metrics
+)
+
+cat("\nOne-Step Ahead Rolling Forecast Metrics:\n")
+print(round(rolling_df, 3))
+
+# plot forecasts
+autoplot(ts_data) +
+  autolayer(forecast(final_arima, h = 11), series = "Forecast") +
+  ggtitle("Final ARIMA Forecast to October 2024") +
+  ylab("PCE") +
+  xlab("Year")
