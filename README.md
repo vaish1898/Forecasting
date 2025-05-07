@@ -88,7 +88,7 @@ This repository contains a comprehensive time series analysis and forecasting pr
 
 1. Clone this repository.
 2. Place `PCE.csv` in the working directory.
-3. Run the R script `forecasting_analysis.R`.
+3. Run the R script `R Repository`.
 4. Required R packages:
    ```r
    install.packages(c("forecast", "imputeTS", "Metrics", "ggplot2"))
